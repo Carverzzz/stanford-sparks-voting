@@ -10,6 +10,7 @@ export const ParticipantView: React.FC = () => {
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [countdownSeconds, setCountdownSeconds] = useState<number | null>(null);
   const [isExpired, setIsExpired] = useState(false);
+  const [posterMode, setPosterMode] = useState(false);
   
   // Generate unique session ID for this user (persist in localStorage)
   const [userSessionId] = useState(() => {
@@ -96,6 +97,38 @@ export const ParticipantView: React.FC = () => {
     };
   }, [userSessionId]);
 
+  // 监听 session poster_mode 变化 + 初始化
+  useEffect(() => {
+    const fetchSessionPoster = async () => {
+      const { data } = await supabase
+        .from('sessions')
+        .select('poster_mode')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      if (data) setPosterMode(!!(data as any).poster_mode);
+    };
+    fetchSessionPoster();
+
+    const sessionChannel = supabase
+      .channel('participant-session-changes')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'sessions' },
+        (payload) => {
+          const newRow: any = (payload as any).new;
+          if (newRow?.is_active) {
+            setPosterMode(!!newRow.poster_mode);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(sessionChannel);
+    };
+  }, []);
+
   // 倒计时显示 & 到期后本地禁用投票
   useEffect(() => {
     if (round?.status === RoundStatus.VOTING && round.voting_ends_at) {
@@ -160,11 +193,20 @@ export const ParticipantView: React.FC = () => {
     }
   };
 
+  if (posterMode) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center p-4">
+        <img src="/poster-mobile.png" alt="Poster" className="max-h-screen max-w-screen object-contain rounded-2xl shadow-2xl" />
+      </div>
+    );
+  }
+
   if (!round || round.status === RoundStatus.COMPLETED) {
     return (
       <div className="min-h-screen bg-ui-50 flex flex-col items-center justify-center p-6 text-center">
-        <div className="w-20 h-20 bg-white rounded-2xl shadow-sm flex items-center justify-center mb-6 animate-pulse">
-            <Loader2 className="text-stanford" size={40} />
+        <img src="/spark-logo.jpg" alt="Stanford Sparks" className="w-20 h-20 rounded-xl shadow-sm mb-4" />
+        <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center mb-4 animate-pulse">
+            <Loader2 className="text-stanford" size={32} />
         </div>
         <h2 className="text-2xl font-bold text-ui-900">You're all set!</h2>
         <p className="text-ui-500 mt-2 text-lg">Watch the big screen.<br/>Voting options will appear here automatically.</p>
@@ -180,9 +222,12 @@ export const ParticipantView: React.FC = () => {
       <div className="max-w-md mx-auto w-full flex-1 flex flex-col">
         
         {/* Header */}
-        <div className="text-center space-y-1 my-6">
-            <h3 className="text-xs font-bold tracking-widest text-stanford uppercase">Spot the Lie</h3>
-            <h1 className="text-3xl font-extrabold text-ui-900">{round.participant_name}</h1>
+        <div className="flex items-center justify-center gap-3 my-6">
+            <img src="/spark-logo.jpg" alt="Stanford Sparks" className="w-12 h-12 rounded-lg shadow-sm" />
+            <div className="text-center space-y-1">
+                <h3 className="text-xs font-bold tracking-widest text-stanford uppercase">Spot the Lie</h3>
+                <h1 className="text-3xl font-extrabold text-ui-900">{round.participant_name}</h1>
+            </div>
         </div>
 
         {/* Status Bar */}

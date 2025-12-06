@@ -203,6 +203,7 @@ export const DisplayView: React.FC = () => {
   if (!currentRound) {
       return (
           <div className="min-h-screen bg-white flex flex-col items-center justify-center p-12 text-center">
+              <img src="/spark-logo.jpg" alt="Stanford Sparks" className="w-24 h-24 mb-6 rounded-lg shadow-sm" />
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -238,7 +239,7 @@ export const DisplayView: React.FC = () => {
         {/* Header */}
         <header className="flex justify-between items-start border-b border-ui-200 pb-4 gap-4">
             <div className="flex items-center gap-3">
-                <img src="/spark-logo.svg" alt="Stanford Sparks" className="w-12 h-12 md:w-14 md:h-14" />
+                <img src="/spark-logo.jpg" alt="Stanford Sparks" className="w-12 h-12 md:w-14 md:h-14 rounded-lg shadow-sm" />
                 <div className="space-y-1">
                     <h2 className="text-lg font-bold text-stanford uppercase tracking-wider">Two Truths & One Lie</h2>
                     <h1 className="text-3xl md:text-4xl font-extrabold text-ui-900 tracking-tight leading-tight">{currentRound.participant_name}</h1>

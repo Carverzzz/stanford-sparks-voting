@@ -656,10 +656,13 @@ export const HostDashboard: React.FC = () => {
     <div className="min-h-screen bg-ui-100 p-6 font-sans">
       <header className="flex flex-col gap-4 mb-8 bg-white p-4 rounded-xl shadow-sm border border-ui-200">
           <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-bold text-ui-900">Host Control Center</h1>
-            <p className="text-ui-500 text-sm">Manage the flow of the event</p>
-          </div>
+            <div className="flex items-center gap-3">
+              <img src="/spark-logo.jpg" alt="Stanford Sparks" className="w-12 h-12 rounded-lg shadow-sm" />
+              <div>
+                <h1 className="text-2xl font-bold text-ui-900">Host Control Center</h1>
+                <p className="text-ui-500 text-sm">Manage the flow of the event</p>
+              </div>
+            </div>
           <div className="flex gap-3">
                <Button
                   onClick={startNewSession}
