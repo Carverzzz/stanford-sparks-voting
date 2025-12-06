@@ -26,12 +26,14 @@ export enum RoundStatus {
 
 export interface Round {
   id: string;
+  session_id?: string; // 活动ID
   participant_id: string;
   participant_name: string; // Denormalized for easier UI
   options: string[]; // Array of 3 strings
   correct_option_index: number; // The index of the lie
   status: RoundStatus;
   created_at: string;
+  updated_at?: string;
   votes: { [key: number]: number }; // Aggregated votes for chart
 }
 
@@ -41,11 +43,21 @@ export interface Vote {
   user_session_id: string;
 }
 
+// 活动/会话
+export interface Session {
+  id: string;
+  name: string;
+  is_active: boolean;
+  created_at: string;
+  ended_at?: string;
+}
+
 export const CHANNELS = {
   GAME: 'game-room'
 };
 
 export const EVENTS = {
   ROUND_UPDATE: 'round-update',
-  NEW_VOTE: 'new-vote'
+  NEW_VOTE: 'new-vote',
+  SESSION_UPDATE: 'session-update'
 };

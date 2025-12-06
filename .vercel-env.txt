@@ -1,0 +1,6 @@
+# Vercel 环境变量配置
+# 部署时使用: vercel env add VITE_SUPABASE_URL
+# 部署时使用: vercel env add VITE_SUPABASE_ANON_KEY
+
+VITE_SUPABASE_URL=https://fcnwowdnjpkcfxmtceqw.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjbndvd2RuanBrY2Z4bXRjZXF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ3NTIzOTEsImV4cCI6MjA4MDMyODM5MX0.VeyjA4zEfbNpPTd719l8nSYHrGg7ocGq51e-oj71-Z4

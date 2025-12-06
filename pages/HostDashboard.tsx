@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { parseExcel } from '../utils/excelParser';
-import { Participant, Round, RoundStatus, CHANNELS, EVENTS } from '../types';
+import { Participant, Round, RoundStatus, CHANNELS, EVENTS, Session } from '../types';
 import { Button } from '../components/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/Card';
-import { Upload, Users, Play, Lock, Eye, StopCircle, BarChart3, Trash2, ChevronRight, List } from 'lucide-react';
+import { Upload, Users, Play, Lock, Eye, StopCircle, BarChart3, Trash2, ChevronRight, List, RefreshCw, History, PlusCircle } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
 export const HostDashboard: React.FC = () => {
@@ -12,7 +12,9 @@ export const HostDashboard: React.FC = () => {
   const [currentRound, setCurrentRound] = useState<Round | null>(null);
   const [voteCounts, setVoteCounts] = useState<{ [key: number]: number }>({ 0: 0, 1: 0, 2: 0 });
   const [isLoading, setIsLoading] = useState(false);
-  const [activeParticipants, setActiveParticipants] = useState(0); // 活跃参与人数
+  const [activeParticipants, setActiveParticipants] = useState(0);
+  const [roundHistory, setRoundHistory] = useState<Round[]>([]); // 投票历史
+  const [currentSession, setCurrentSession] = useState<Session | null>(null); // 当前活动
 
   // Function to fetch vote counts from database
   const fetchVoteCounts = async (roundId: string) => {
@@ -35,6 +37,50 @@ export const HostDashboard: React.FC = () => {
     return counts;
   };
 
+  // 获取所有 rounds 的历史记录
+  const fetchRoundHistory = async () => {
+    const { data } = await supabase
+      .from('rounds')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(50);
+    
+    if (data) {
+      setRoundHistory(data);
+    }
+  };
+
+  // 开始新活动（清除所有数据，重新开始）
+  const startNewSession = async () => {
+    if (!confirm('确定要开始新活动吗？这将结束当前所有投票轮次。')) return;
+    
+    setIsLoading(true);
+    
+    // 结束所有进行中的 rounds
+    await supabase
+      .from('rounds')
+      .update({ status: RoundStatus.COMPLETED })
+      .in('status', ['PENDING', 'VOTING', 'LOCKED', 'REVEALED']);
+    
+    // 清除当前状态
+    setCurrentRound(null);
+    setVoteCounts({ 0: 0, 1: 0, 2: 0 });
+    setActiveParticipants(0);
+    
+    // 广播清除
+    await supabase.channel(CHANNELS.GAME).send({
+      type: 'broadcast',
+      event: EVENTS.ROUND_UPDATE,
+      payload: null
+    });
+    
+    // 刷新历史
+    await fetchRoundHistory();
+    
+    setIsLoading(false);
+    toast.success('新活动已开始！所有投票已重置。');
+  };
+
   // Fetch current active round from database on load
   useEffect(() => {
     const fetchActiveRound = async () => {
@@ -53,6 +99,7 @@ export const HostDashboard: React.FC = () => {
       }
     };
     fetchActiveRound();
+    fetchRoundHistory();
   }, []);
 
   // Subscribe to Realtime votes and database changes
@@ -246,6 +293,13 @@ export const HostDashboard: React.FC = () => {
             <p className="text-ui-500 text-sm">Manage the flow of the event</p>
           </div>
           <div className="flex gap-3">
+             <Button
+                onClick={startNewSession}
+                disabled={isLoading}
+                className="bg-green-600 hover:bg-green-700 text-white"
+             >
+                <PlusCircle size={16} className="mr-2" /> 开始新活动
+             </Button>
              <label className="cursor-pointer">
                 <input type="file" accept=".xlsx" className="hidden" onChange={handleFileUpload} />
                 <div className="bg-ui-900 text-white hover:bg-black px-4 py-2 rounded-lg flex items-center gap-2 font-medium shadow-sm transition text-sm">
@@ -420,6 +474,68 @@ export const HostDashboard: React.FC = () => {
                         </div>
                     </div>
                 )}
+
+                {/* 投票历史记录 */}
+                <Card className="mt-6">
+                    <CardHeader className="bg-ui-50 border-b border-ui-200 py-4">
+                        <CardTitle>
+                            <span className="flex items-center gap-2 text-lg">
+                                <History size={18}/> 投票历史记录 ({roundHistory.length})
+                                <Button 
+                                    onClick={fetchRoundHistory} 
+                                    variant="outline" 
+                                    className="ml-auto h-8 px-2"
+                                >
+                                    <RefreshCw size={14} />
+                                </Button>
+                            </span>
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        {roundHistory.length === 0 ? (
+                            <div className="text-center py-8 text-ui-400">
+                                暂无投票记录
+                            </div>
+                        ) : (
+                            <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                                {roundHistory.map((r, idx) => (
+                                    <div 
+                                        key={r.id} 
+                                        className={`p-3 rounded-lg border flex justify-between items-center ${
+                                            r.status === RoundStatus.COMPLETED 
+                                                ? 'border-ui-200 bg-ui-50' 
+                                                : 'border-stanford bg-red-50'
+                                        }`}
+                                    >
+                                        <div>
+                                            <div className="font-semibold text-ui-800">{r.participant_name}</div>
+                                            <div className="text-xs text-ui-400">
+                                                {new Date(r.created_at).toLocaleString('zh-CN')}
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className={`text-xs px-2 py-1 rounded ${
+                                                r.status === RoundStatus.COMPLETED 
+                                                    ? 'bg-gray-200 text-gray-700' 
+                                                    : r.status === RoundStatus.VOTING 
+                                                        ? 'bg-green-100 text-green-700'
+                                                        : r.status === RoundStatus.REVEALED 
+                                                            ? 'bg-blue-100 text-blue-700'
+                                                            : 'bg-yellow-100 text-yellow-700'
+                                            }`}>
+                                                {r.status === RoundStatus.COMPLETED ? '已完成' 
+                                                    : r.status === RoundStatus.VOTING ? '投票中'
+                                                    : r.status === RoundStatus.REVEALED ? '已揭示'
+                                                    : r.status === RoundStatus.LOCKED ? '已锁定'
+                                                    : '待开始'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
             </div>
       </div>
     </div>

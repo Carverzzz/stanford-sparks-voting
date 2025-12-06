@@ -18,36 +18,46 @@ export const ParticipantView: React.FC = () => {
     return newId;
   });
 
-  useEffect(() => {
-    // 1. Check for current active round on load
-    const fetchActiveRound = async () => {
-        const { data } = await supabase
-            .from('rounds')
-            .select('*')
-            .in('status', ['PENDING', 'VOTING', 'LOCKED', 'REVEALED'])
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
+  // 从数据库获取当前活跃的 round
+  const fetchActiveRound = async () => {
+    const { data } = await supabase
+        .from('rounds')
+        .select('*')
+        .in('status', ['PENDING', 'VOTING', 'LOCKED', 'REVEALED'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+    
+    if (data) {
+        setRound(data);
+        // Check if user already voted in this round
+        const { data: existingVote } = await supabase
+          .from('votes')
+          .select('option_index')
+          .eq('round_id', data.id)
+          .eq('user_session_id', userSessionId)
+          .single();
         
-        if (data) {
-            setRound(data);
-            // Check if user already voted in this round
-            const { data: existingVote } = await supabase
-              .from('votes')
-              .select('option_index')
-              .eq('round_id', data.id)
-              .eq('user_session_id', userSessionId)
-              .single();
-            
-            if (existingVote) {
-              setHasVoted(true);
-              setSelectedOption(existingVote.option_index);
-            }
+        if (existingVote) {
+          setHasVoted(true);
+          setSelectedOption(existingVote.option_index);
+        } else {
+          setHasVoted(false);
+          setSelectedOption(null);
         }
-    };
+    } else {
+        // 没有活跃的 round
+        setRound(null);
+        setHasVoted(false);
+        setSelectedOption(null);
+    }
+  };
+
+  useEffect(() => {
+    // 1. 初始加载
     fetchActiveRound();
 
-    // 2. Listen for real-time updates
+    // 2. 监听 broadcast 事件（实时更新）
     const channel = supabase
       .channel(CHANNELS.GAME)
       .on('broadcast', { event: EVENTS.ROUND_UPDATE }, ({ payload }) => {
@@ -62,10 +72,27 @@ export const ParticipantView: React.FC = () => {
       })
       .subscribe();
 
+    // 3. 监听数据库变化（更可靠）
+    const dbChannel = supabase
+      .channel('participant-rounds-changes')
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'rounds' },
+        async (payload) => {
+          // 当 rounds 表有任何变化时，重新获取当前活跃的 round
+          await fetchActiveRound();
+        }
+      )
+      .subscribe();
+
+    // 4. 定期轮询作为备份（每3秒）
+    const pollInterval = setInterval(fetchActiveRound, 3000);
+
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(dbChannel);
+      clearInterval(pollInterval);
     };
-  }, [round?.id]);
+  }, [userSessionId]);
 
   const handleVote = async (index: number) => {
     if (hasVoted || !round || round.status !== RoundStatus.VOTING) return;
