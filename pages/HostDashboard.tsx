@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { parseExcel } from '../utils/excelParser';
+import { parseCSVFile } from '../utils/csvParser';
 import { fetchFromGoogleSheets, buildCsvUrl, DEFAULT_SHEET_URL } from '../utils/googleSheetsSync';
 import { Participant, Round, RoundStatus, CHANNELS, EVENTS, Session } from '../types';
 import { Button } from '../components/Button';
@@ -131,21 +132,54 @@ export const HostDashboard: React.FC = () => {
     setIsLoading(false);
   };
 
-  // Fetch current active round from database on load
+  // Fetch current active round and participants from database on load
   useEffect(() => {
     const fetchActiveRound = async () => {
-      const { data } = await supabase
-        .from('rounds')
+      // 获取当前活动
+      const { data: activeSession } = await supabase
+        .from('sessions')
         .select('*')
-        .in('status', ['PENDING', 'VOTING', 'LOCKED', 'REVEALED'])
+        .eq('is_active', true)
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
       
-      if (data) {
-        setCurrentRound(data);
-        const counts = await fetchVoteCounts(data.id);
-        setVoteCounts(counts);
+      if (activeSession) {
+        setCurrentSession(activeSession);
+        
+        // 获取当前活动的参与者
+        const { data: sessionParticipants } = await supabase
+          .from('participants')
+          .select('*')
+          .eq('session_id', activeSession.id)
+          .order('created_at', { ascending: true });
+        
+        if (sessionParticipants) {
+          const formatted = sessionParticipants.map(p => ({
+            name: p.name,
+            statement_1: p.statement_1,
+            statement_2: p.statement_2,
+            statement_3: p.statement_3,
+            lie_index: p.lie_index
+          }));
+          setParticipants(formatted);
+        }
+        
+        // 获取当前活动的轮次
+        const { data } = await supabase
+          .from('rounds')
+          .select('*')
+          .eq('session_id', activeSession.id)
+          .in('status', ['PENDING', 'VOTING', 'LOCKED', 'REVEALED'])
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        
+        if (data) {
+          setCurrentRound(data);
+          const counts = await fetchVoteCounts(data.id);
+          setVoteCounts(counts);
+        }
       }
     };
     fetchActiveRound();
@@ -232,13 +266,105 @@ export const HostDashboard: React.FC = () => {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setIsLoading(true);
       try {
-        const data = await parseExcel(e.target.files[0]);
-        setParticipants(data);
-        toast.success(`Loaded ${data.length} participants!`);
+        let data;
+        // 根据文件扩展名选择解析器
+        if (file.name.endsWith('.csv')) {
+          data = await parseCSVFile(file);
+        } else {
+          data = await parseExcel(file);
+        }
+        
+        // 获取当前活动 ID（如果没有，创建一个默认活动）
+        let sessionId = currentSession?.id;
+        if (!sessionId) {
+          // 创建或获取默认活动
+          const { data: defaultSession, error: sessionError } = await supabase
+            .from('sessions')
+            .select('id')
+            .eq('is_active', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+          
+          if (sessionError || !defaultSession) {
+            // 创建新活动
+            const { data: newSession, error: createError } = await supabase
+              .from('sessions')
+              .insert({ name: `Session ${new Date().toLocaleString()}` })
+              .select()
+              .single();
+            
+            if (createError || !newSession) {
+              throw new Error('无法创建活动，请先开始新活动');
+            }
+            sessionId = newSession.id;
+            setCurrentSession(newSession);
+          } else {
+            sessionId = defaultSession.id;
+          }
+        }
+        
+        // 同步到 Supabase
+        // 先删除当前活动的旧参与者（可选：如果你想保留历史数据，可以注释掉这部分）
+        await supabase
+          .from('participants')
+          .delete()
+          .eq('session_id', sessionId);
+        
+        // 批量插入新参与者
+        const participantsToInsert = data.map(p => ({
+          name: p.name,
+          statement_1: p.statement_1,
+          statement_2: p.statement_2,
+          statement_3: p.statement_3,
+          lie_index: p.lie_index,
+          session_id: sessionId
+        }));
+        
+        const { error: insertError } = await supabase
+          .from('participants')
+          .insert(participantsToInsert);
+        
+        if (insertError) {
+          console.error('Supabase insert error:', insertError);
+          throw new Error(`同步到数据库失败: ${insertError.message}`);
+        }
+        
+        // 从 Supabase 重新获取参与者（确保数据一致）
+        const { data: syncedParticipants, error: fetchError } = await supabase
+          .from('participants')
+          .select('*')
+          .eq('session_id', sessionId)
+          .order('created_at', { ascending: true });
+        
+        if (fetchError) {
+          console.error('Supabase fetch error:', fetchError);
+          // 即使获取失败，也使用本地数据
+          setParticipants(data);
+        } else if (syncedParticipants) {
+          // 转换为本地格式
+          const formatted = syncedParticipants.map(p => ({
+            name: p.name,
+            statement_1: p.statement_1,
+            statement_2: p.statement_2,
+            statement_3: p.statement_3,
+            lie_index: p.lie_index
+          }));
+          setParticipants(formatted);
+        } else {
+          setParticipants(data);
+        }
+        
+        toast.success(`成功导入并同步 ${data.length} 位参与者到 Supabase！`);
       } catch (err) {
-        toast.error("Failed to parse Excel.");
+        const errorMessage = err instanceof Error ? err.message : '导入失败';
+        toast.error(`导入失败: ${errorMessage}`);
         console.error(err);
+      } finally {
+        setIsLoading(false);
       }
     }
   };
@@ -360,9 +486,9 @@ export const HostDashboard: React.FC = () => {
                   <Cloud size={16} className="mr-2" /> {isSyncing ? '同步中...' : '同步 Google Sheets'}
                </Button>
                <label className="cursor-pointer">
-                  <input type="file" accept=".xlsx" className="hidden" onChange={handleFileUpload} />
+                  <input type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFileUpload} />
                   <div className="bg-ui-900 text-white hover:bg-black px-4 py-2 rounded-lg flex items-center gap-2 font-medium shadow-sm transition text-sm">
-                      <Upload size={16} /> Import Excel
+                      <Upload size={16} /> Import Excel/CSV
                   </div>
                </label>
             </div>
