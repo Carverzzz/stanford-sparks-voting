@@ -26,6 +26,14 @@ BEGIN
   END IF;
 END $$;
 
+-- Poster mode flag on sessions
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sessions' AND column_name = 'poster_mode') THEN
+    ALTER TABLE sessions ADD COLUMN poster_mode BOOLEAN NOT NULL DEFAULT false;
+  END IF;
+END $$;
+
 -- Index for sessions
 CREATE INDEX IF NOT EXISTS idx_sessions_is_active ON sessions(is_active);
 CREATE INDEX IF NOT EXISTS idx_rounds_session_id ON rounds(session_id);

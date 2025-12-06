@@ -11,6 +11,7 @@ export const DisplayView: React.FC = () => {
   const [votes, setVotes] = useState<{ [key: number]: number }>({ 0: 0, 1: 0, 2: 0 });
   const [activeParticipants, setActiveParticipants] = useState(0); // 活跃参与人数
   const [countdownSeconds, setCountdownSeconds] = useState<number | null>(null);
+  const [posterMode, setPosterMode] = useState(false);
 
   // Get current hostname for QR code
   const [joinUrl, setJoinUrl] = useState('');
@@ -142,6 +143,38 @@ export const DisplayView: React.FC = () => {
     };
   }, [currentRound?.id]);
 
+  // 监听 session poster_mode 变化 + 初始化
+  useEffect(() => {
+    const fetchSessionPoster = async () => {
+      const { data } = await supabase
+        .from('sessions')
+        .select('poster_mode')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      if (data) setPosterMode(!!(data as any).poster_mode);
+    };
+    fetchSessionPoster();
+
+    const sessionChannel = supabase
+      .channel('display-session-changes')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'sessions' },
+        (payload) => {
+          const newRow: any = (payload as any).new;
+          if (newRow?.is_active) {
+            setPosterMode(!!newRow.poster_mode);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(sessionChannel);
+    };
+  }, []);
+
   // 初始化倒计时（仅在 VOTING 时）
   useEffect(() => {
     if (currentRound?.status === RoundStatus.VOTING && currentRound.voting_ends_at) {
@@ -163,6 +196,8 @@ export const DisplayView: React.FC = () => {
     votes: votes[i] || 0,
     index: i
   })) : [];
+  const lieText = currentRound ? currentRound.options[currentRound.correct_option_index] : '';
+  const showAnswer = currentRound?.status === RoundStatus.REVEALED;
 
   // IDLE STATE: QR CODE
   if (!currentRound) {
@@ -188,17 +223,26 @@ export const DisplayView: React.FC = () => {
       );
   }
 
-  const lieText = currentRound.options[currentRound.correct_option_index];
-  const showAnswer = currentRound.status === RoundStatus.REVEALED;
+  // Poster override
+  if (posterMode) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center p-4">
+        <img src="/poster-desktop.png" alt="Poster" className="max-h-screen max-w-screen object-contain rounded-2xl shadow-2xl" />
+      </div>
+    );
+  }
 
   // ACTIVE ROUND STATE
   return (
     <div className="min-h-screen bg-ui-50 p-4 md:p-6 flex flex-col">
         {/* Header */}
         <header className="flex justify-between items-start border-b border-ui-200 pb-4 gap-4">
-            <div className="space-y-1">
-                <h2 className="text-lg font-bold text-stanford uppercase tracking-wider">Two Truths & One Lie</h2>
-                <h1 className="text-3xl md:text-4xl font-extrabold text-ui-900 tracking-tight leading-tight">{currentRound.participant_name}</h1>
+            <div className="flex items-center gap-3">
+                <img src="/spark-logo.svg" alt="Stanford Sparks" className="w-12 h-12 md:w-14 md:h-14" />
+                <div className="space-y-1">
+                    <h2 className="text-lg font-bold text-stanford uppercase tracking-wider">Two Truths & One Lie</h2>
+                    <h1 className="text-3xl md:text-4xl font-extrabold text-ui-900 tracking-tight leading-tight">{currentRound.participant_name}</h1>
+                </div>
             </div>
             <div className="flex gap-3">
                 <div className="bg-white px-4 py-2 rounded-xl border border-ui-200 shadow-sm text-center min-w-[110px]">

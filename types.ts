@@ -60,5 +60,6 @@ export const CHANNELS = {
 export const EVENTS = {
   ROUND_UPDATE: 'round-update',
   NEW_VOTE: 'new-vote',
-  SESSION_UPDATE: 'session-update'
+  SESSION_UPDATE: 'session-update',
+  POSTER_TOGGLE: 'poster-toggle'
 };

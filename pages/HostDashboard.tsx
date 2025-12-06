@@ -17,6 +17,7 @@ export const HostDashboard: React.FC = () => {
   const [activeParticipants, setActiveParticipants] = useState(0);
   const [roundHistory, setRoundHistory] = useState<Round[]>([]); // 投票历史
   const [currentSession, setCurrentSession] = useState<Session | null>(null); // 当前活动
+  const [posterMode, setPosterMode] = useState(false);
   const [sheetUrl, setSheetUrl] = useState(DEFAULT_SHEET_URL); // Google Sheets URL
   const [isSyncing, setIsSyncing] = useState(false); // 是否正在同步
   const [timerMinutes, setTimerMinutes] = useState(2);
@@ -150,6 +151,7 @@ export const HostDashboard: React.FC = () => {
       
       if (activeSession) {
         setCurrentSession(activeSession);
+        setPosterMode(activeSession.poster_mode ?? false);
         
         // 获取当前活动的参与者
         const { data: sessionParticipants } = await supabase
@@ -477,6 +479,25 @@ export const HostDashboard: React.FC = () => {
     return () => clearInterval(interval);
   }, [currentRound?.id, currentRound?.status, currentRound?.voting_ends_at]);
 
+  // 监听 sessions 表的 poster_mode 变化
+  useEffect(() => {
+    const sessionChannel = supabase
+      .channel('host-session-changes')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'sessions' },
+        (payload) => {
+          if (currentSession && payload.new && payload.new.id === currentSession.id) {
+            setPosterMode(!!payload.new.poster_mode);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(sessionChannel);
+    };
+  }, [currentSession?.id]);
+
   const startTimer = async () => {
     if (!currentRound || currentRound.status !== RoundStatus.PENDING) return;
     const durationMs = Math.max(5 * 1000, (timerMinutes * 60 + timerSeconds) * 1000);
@@ -543,6 +564,39 @@ export const HostDashboard: React.FC = () => {
       toast.success('Timer cancelled, back to pending.');
     } catch (err) {
       const msg = err instanceof Error ? err.message : '取消倒计时失败';
+      toast.error(msg);
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const togglePosterMode = async () => {
+    if (!currentSession) {
+      toast.error('No active session');
+      return;
+    }
+    const next = !posterMode;
+    setIsLoading(true);
+    try {
+      const { error } = await supabase
+        .from('sessions')
+        .update({ poster_mode: next })
+        .eq('id', currentSession.id);
+      if (error) throw error;
+
+      setPosterMode(next);
+
+      // Broadcast poster toggle (for immediate effect)
+      await supabase.channel(CHANNELS.GAME).send({
+        type: 'broadcast',
+        event: EVENTS.POSTER_TOGGLE,
+        payload: { poster_mode: next }
+      });
+
+      toast.success(next ? '已切换到海报模式' : '已退出海报模式');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '切换海报模式失败';
       toast.error(msg);
       console.error(err);
     } finally {
@@ -757,6 +811,14 @@ export const HostDashboard: React.FC = () => {
                                     className="w-full h-16 text-lg"
                                 >
                                     <StopCircle size={20} className="mr-2" /> Cancel Timer
+                                </Button>
+
+                                <Button 
+                                    onClick={togglePosterMode}
+                                    variant={posterMode ? "destructive" : "outline"}
+                                    className="w-full h-16 text-lg"
+                                >
+                                    {posterMode ? '退出海报模式' : '显示海报'}
                                 </Button>
                                 
                                 <Button 
