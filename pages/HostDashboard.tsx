@@ -511,6 +511,45 @@ export const HostDashboard: React.FC = () => {
     toast.success('Voting started with timer!');
   };
 
+  // 取消倒计时，恢复到开始前状态
+  const cancelTimer = async () => {
+    if (!currentRound || currentRound.status !== RoundStatus.VOTING) return;
+    setIsLoading(true);
+    try {
+      const { data: updatedRound, error } = await supabase
+        .from('rounds')
+        .update({ status: RoundStatus.PENDING, voting_ends_at: null })
+        .eq('id', currentRound.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      const newRoundState: Round = {
+        ...currentRound,
+        status: RoundStatus.PENDING,
+        voting_ends_at: null,
+      };
+      setCurrentRound(newRoundState);
+      setRemainingSeconds(null);
+
+      // Broadcast revert
+      await supabase.channel(CHANNELS.GAME).send({
+        type: 'broadcast',
+        event: EVENTS.ROUND_UPDATE,
+        payload: newRoundState,
+      });
+
+      toast.success('Timer cancelled, back to pending.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '取消倒计时失败';
+      toast.error(msg);
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const updateStatus = async (status: RoundStatus) => {
     if (!currentRound) return;
 
@@ -709,6 +748,15 @@ export const HostDashboard: React.FC = () => {
                                     className={`w-full h-16 text-lg ${currentRound.status === RoundStatus.VOTING ? 'ring-2 ring-offset-2 ring-stanford' : ''}`}
                                 >
                                     <Play size={20} className="mr-2" /> Start Timer
+                                </Button>
+                                
+                                <Button 
+                                    onClick={cancelTimer}
+                                    disabled={currentRound.status !== RoundStatus.VOTING}
+                                    variant="secondary"
+                                    className="w-full h-16 text-lg"
+                                >
+                                    <StopCircle size={20} className="mr-2" /> Cancel Timer
                                 </Button>
                                 
                                 <Button 
