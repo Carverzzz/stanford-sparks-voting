@@ -96,6 +96,11 @@ export const DisplayView: React.FC = () => {
             setVotes(counts);
         }
       })
+      .on('broadcast', { event: EVENTS.POSTER_TOGGLE }, ({ payload }) => {
+        if (payload && typeof payload.poster_mode === 'boolean') {
+          setPosterMode(payload.poster_mode);
+        }
+      })
       .on('broadcast', { event: EVENTS.NEW_VOTE }, ({ payload }) => {
         if (payload && typeof payload.option_index === 'number' && currentRound) {
             setVotes(prev => ({
@@ -224,18 +229,15 @@ export const DisplayView: React.FC = () => {
       );
   }
 
-  // Poster override
-  if (posterMode) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center p-4">
-        <img src="/poster-desktop.png" alt="Poster" className="max-h-screen max-w-screen object-contain rounded-2xl shadow-2xl" />
-      </div>
-    );
-  }
-
   // ACTIVE ROUND STATE
   return (
-    <div className="min-h-screen bg-ui-50 p-4 md:p-6 flex flex-col">
+    <div className="relative min-h-screen bg-ui-50 p-4 md:p-6 flex flex-col overflow-hidden">
+        {/* Poster overlay */}
+        {posterMode && (
+          <div className="absolute inset-0 z-30 bg-black flex items-center justify-center p-4">
+            <img src="/poster-desktop.png" alt="Poster" className="max-h-full max-w-full object-contain rounded-2xl shadow-2xl" />
+          </div>
+        )}
         {/* Header */}
         <header className="flex justify-between items-start border-b border-ui-200 pb-4 gap-4">
             <div className="flex items-center gap-3">

@@ -73,6 +73,11 @@ export const ParticipantView: React.FC = () => {
             setSelectedOption(null);
         }
       })
+      .on('broadcast', { event: EVENTS.POSTER_TOGGLE }, ({ payload }) => {
+        if (payload && typeof payload.poster_mode === 'boolean') {
+          setPosterMode(payload.poster_mode);
+        }
+      })
       .subscribe();
 
     // 3. 监听数据库变化（更可靠）
@@ -193,17 +198,14 @@ export const ParticipantView: React.FC = () => {
     }
   };
 
-  if (posterMode) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center p-4">
-        <img src="/poster-mobile.png" alt="Poster" className="max-h-screen max-w-screen object-contain rounded-2xl shadow-2xl" />
-      </div>
-    );
-  }
-
   if (!round || round.status === RoundStatus.COMPLETED) {
     return (
-      <div className="min-h-screen bg-ui-50 flex flex-col items-center justify-center p-6 text-center">
+      <div className="relative min-h-screen bg-ui-50 flex flex-col items-center justify-center p-6 text-center overflow-hidden">
+        {posterMode && (
+          <div className="absolute inset-0 z-30 bg-black flex items-center justify-center p-4">
+            <img src="/poster-mobile.png" alt="Poster" className="max-h-full max-w-full object-contain rounded-2xl shadow-2xl" />
+          </div>
+        )}
         <img src="/spark-logo.jpg" alt="Stanford Sparks" className="w-20 h-20 rounded-xl shadow-sm mb-4" />
         <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center mb-4 animate-pulse">
             <Loader2 className="text-stanford" size={32} />
@@ -218,7 +220,12 @@ export const ParticipantView: React.FC = () => {
   const isRevealed = round.status === RoundStatus.REVEALED;
 
   return (
-    <div className="min-h-screen bg-ui-50 p-4 flex flex-col">
+    <div className="relative min-h-screen bg-ui-50 p-4 flex flex-col overflow-hidden">
+      {posterMode && (
+        <div className="absolute inset-0 z-30 bg-black flex items-center justify-center p-4">
+          <img src="/poster-mobile.png" alt="Poster" className="max-h-full max-w-full object-contain rounded-2xl shadow-2xl" />
+        </div>
+      )}
       <div className="max-w-md mx-auto w-full flex-1 flex flex-col">
         
         {/* Header */}
