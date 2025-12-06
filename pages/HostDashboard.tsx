@@ -58,10 +58,11 @@ export const HostDashboard: React.FC = () => {
     setIsSyncing(true);
     try {
       const csvUrl = buildCsvUrl(sheetUrl);
+      console.log('Fetching from:', csvUrl);
       const data = await fetchFromGoogleSheets(csvUrl);
       
       if (data.length === 0) {
-        toast.error('没有找到有效的参与者数据');
+        toast.error('没有找到有效的参与者数据，请检查 Sheet 中是否有数据');
         return;
       }
       
@@ -69,7 +70,16 @@ export const HostDashboard: React.FC = () => {
       toast.success(`成功从 Google Sheets 同步 ${data.length} 位参与者！`);
     } catch (error) {
       console.error('Sync error:', error);
-      toast.error('同步失败，请检查 Google Sheets URL 是否正确');
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      if (errorMessage.includes('需要公开访问') || errorMessage.includes('403')) {
+        toast.error(
+          'Google Sheets 需要公开访问权限。\n请将 Sheet 设为"任何拥有链接的人都可以查看"',
+          { duration: 5000 }
+        );
+      } else {
+        toast.error(`同步失败: ${errorMessage.substring(0, 100)}`, { duration: 5000 });
+      }
     } finally {
       setIsSyncing(false);
     }

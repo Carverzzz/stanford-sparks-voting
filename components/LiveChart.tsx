@@ -76,8 +76,8 @@ export const LiveChart: React.FC<LiveChartProps> = ({ data, totalVotes, activePa
                  </span>
                  <div className="text-right">
                     <span className="font-bold text-stanford block">
-                        {totalVotes > 0 ? Math.round((d.votes / totalVotes) * 100) : 0}%
-                    </span>
+                    {totalVotes > 0 ? Math.round((d.votes / totalVotes) * 100) : 0}%
+                 </span>
                     {activeParticipants > 0 && (
                         <span className="text-xs text-ui-500 block">
                             {d.votes}/{activeParticipants}

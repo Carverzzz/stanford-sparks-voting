@@ -92,12 +92,35 @@ function splitTruths(truthsStr: string): [string, string] {
 // 从 CSV URL 获取并解析数据
 export async function fetchFromGoogleSheets(csvUrl: string): Promise<Omit<Participant, 'id'>[]> {
   try {
-    const response = await fetch(csvUrl);
+    // 尝试直接访问
+    let response = await fetch(csvUrl, {
+      mode: 'cors',
+      credentials: 'omit'
+    });
+    
+    // 如果直接访问失败，尝试使用 CORS 代理
+    if (!response.ok || response.status === 403 || response.status === 0) {
+      console.log('Direct access failed, trying CORS proxy...');
+      // 使用公共 CORS 代理
+      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(csvUrl)}`;
+      response = await fetch(proxyUrl, {
+        mode: 'cors',
+        credentials: 'omit'
+      });
+    }
+    
     if (!response.ok) {
-      throw new Error(`Failed to fetch: ${response.status}`);
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`Failed to fetch: ${response.status} ${response.statusText}. ${errorText.substring(0, 100)}`);
     }
     
     const csvText = await response.text();
+    
+    // 检查是否是 HTML 错误页面
+    if (csvText.trim().startsWith('<!DOCTYPE') || csvText.includes('<html')) {
+      throw new Error('Google Sheets 需要公开访问权限。请将 Sheet 设为"任何拥有链接的人都可以查看"。');
+    }
+    
     const rows = parseCSV(csvText);
     
     // 跳过表头
@@ -135,6 +158,13 @@ export async function fetchFromGoogleSheets(csvUrl: string): Promise<Omit<Partic
     return participants;
   } catch (error) {
     console.error('Error fetching from Google Sheets:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    // 提供更友好的错误信息
+    if (errorMessage.includes('403') || errorMessage.includes('需要公开访问')) {
+      throw new Error('Google Sheets 需要公开访问权限。\n\n请按以下步骤操作：\n1. 打开 Google Sheets\n2. 点击右上角"共享"按钮\n3. 将权限改为"任何拥有链接的人都可以查看"\n4. 保存后重试');
+    }
+    
     throw error;
   }
 }
