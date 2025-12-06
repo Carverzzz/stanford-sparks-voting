@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { parseExcel } from '../utils/excelParser';
+import { fetchFromGoogleSheets, buildCsvUrl, DEFAULT_SHEET_URL } from '../utils/googleSheetsSync';
 import { Participant, Round, RoundStatus, CHANNELS, EVENTS, Session } from '../types';
 import { Button } from '../components/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/Card';
-import { Upload, Users, Play, Lock, Eye, StopCircle, BarChart3, Trash2, ChevronRight, List, RefreshCw, History, PlusCircle } from 'lucide-react';
+import { Upload, Users, Play, Lock, Eye, StopCircle, BarChart3, Trash2, ChevronRight, List, RefreshCw, History, PlusCircle, Cloud, Link } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
 export const HostDashboard: React.FC = () => {
@@ -15,6 +16,8 @@ export const HostDashboard: React.FC = () => {
   const [activeParticipants, setActiveParticipants] = useState(0);
   const [roundHistory, setRoundHistory] = useState<Round[]>([]); // 投票历史
   const [currentSession, setCurrentSession] = useState<Session | null>(null); // 当前活动
+  const [sheetUrl, setSheetUrl] = useState(DEFAULT_SHEET_URL); // Google Sheets URL
+  const [isSyncing, setIsSyncing] = useState(false); // 是否正在同步
 
   // Function to fetch vote counts from database
   const fetchVoteCounts = async (roundId: string) => {
@@ -50,35 +53,72 @@ export const HostDashboard: React.FC = () => {
     }
   };
 
-  // 开始新活动（清除所有数据，重新开始）
+  // 从 Google Sheets 同步数据
+  const syncFromGoogleSheets = async () => {
+    setIsSyncing(true);
+    try {
+      const csvUrl = buildCsvUrl(sheetUrl);
+      const data = await fetchFromGoogleSheets(csvUrl);
+      
+      if (data.length === 0) {
+        toast.error('没有找到有效的参与者数据');
+        return;
+      }
+      
+      setParticipants(data);
+      toast.success(`成功从 Google Sheets 同步 ${data.length} 位参与者！`);
+    } catch (error) {
+      console.error('Sync error:', error);
+      toast.error('同步失败，请检查 Google Sheets URL 是否正确');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // 开始新活动（清除所有数据，从 Google Sheets 拉取最新数据）
   const startNewSession = async () => {
-    if (!confirm('确定要开始新活动吗？这将结束当前所有投票轮次。')) return;
+    if (!confirm('确定要开始新活动吗？这将结束当前所有投票轮次，并从 Google Sheets 拉取最新数据。')) return;
     
     setIsLoading(true);
     
-    // 结束所有进行中的 rounds
+    // 1. 结束所有进行中的 rounds
     await supabase
       .from('rounds')
       .update({ status: RoundStatus.COMPLETED })
       .in('status', ['PENDING', 'VOTING', 'LOCKED', 'REVEALED']);
     
-    // 清除当前状态
+    // 2. 清除当前状态
     setCurrentRound(null);
     setVoteCounts({ 0: 0, 1: 0, 2: 0 });
     setActiveParticipants(0);
     
-    // 广播清除
+    // 3. 广播清除
     await supabase.channel(CHANNELS.GAME).send({
       type: 'broadcast',
       event: EVENTS.ROUND_UPDATE,
       payload: null
     });
     
-    // 刷新历史
+    // 4. 从 Google Sheets 拉取最新数据
+    try {
+      const csvUrl = buildCsvUrl(sheetUrl);
+      const data = await fetchFromGoogleSheets(csvUrl);
+      
+      if (data.length > 0) {
+        setParticipants(data);
+        toast.success(`新活动已开始！已同步 ${data.length} 位参与者。`);
+      } else {
+        toast.success('新活动已开始！请手动导入参与者数据。');
+      }
+    } catch (error) {
+      console.error('Sync error:', error);
+      toast.success('新活动已开始！同步数据失败，请手动导入。');
+    }
+    
+    // 5. 刷新历史
     await fetchRoundHistory();
     
     setIsLoading(false);
-    toast.success('新活动已开始！所有投票已重置。');
   };
 
   // Fetch current active round from database on load
@@ -287,25 +327,47 @@ export const HostDashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-ui-100 p-6 font-sans">
-      <header className="flex justify-between items-center mb-8 bg-white p-4 rounded-xl shadow-sm border border-ui-200">
-          <div>
-            <h1 className="text-2xl font-bold text-ui-900">Host Control Center</h1>
-            <p className="text-ui-500 text-sm">Manage the flow of the event</p>
+      <header className="flex flex-col gap-4 mb-8 bg-white p-4 rounded-xl shadow-sm border border-ui-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold text-ui-900">Host Control Center</h1>
+              <p className="text-ui-500 text-sm">Manage the flow of the event</p>
+            </div>
+            <div className="flex gap-3">
+               <Button
+                  onClick={startNewSession}
+                  disabled={isLoading}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+               >
+                  <PlusCircle size={16} className="mr-2" /> 开始新活动
+               </Button>
+               <Button
+                  onClick={syncFromGoogleSheets}
+                  disabled={isSyncing}
+                  variant="outline"
+                  className="border-blue-500 text-blue-600 hover:bg-blue-50"
+               >
+                  <Cloud size={16} className="mr-2" /> {isSyncing ? '同步中...' : '同步 Google Sheets'}
+               </Button>
+               <label className="cursor-pointer">
+                  <input type="file" accept=".xlsx" className="hidden" onChange={handleFileUpload} />
+                  <div className="bg-ui-900 text-white hover:bg-black px-4 py-2 rounded-lg flex items-center gap-2 font-medium shadow-sm transition text-sm">
+                      <Upload size={16} /> Import Excel
+                  </div>
+               </label>
+            </div>
           </div>
-          <div className="flex gap-3">
-             <Button
-                onClick={startNewSession}
-                disabled={isLoading}
-                className="bg-green-600 hover:bg-green-700 text-white"
-             >
-                <PlusCircle size={16} className="mr-2" /> 开始新活动
-             </Button>
-             <label className="cursor-pointer">
-                <input type="file" accept=".xlsx" className="hidden" onChange={handleFileUpload} />
-                <div className="bg-ui-900 text-white hover:bg-black px-4 py-2 rounded-lg flex items-center gap-2 font-medium shadow-sm transition text-sm">
-                    <Upload size={16} /> Import Excel
-                </div>
-             </label>
+          
+          {/* Google Sheets URL 输入 */}
+          <div className="flex gap-2 items-center">
+            <Link size={16} className="text-ui-400" />
+            <input
+              type="text"
+              value={sheetUrl}
+              onChange={(e) => setSheetUrl(e.target.value)}
+              placeholder="Google Sheets URL"
+              className="flex-1 px-3 py-2 border border-ui-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-stanford"
+            />
           </div>
       </header>
 
