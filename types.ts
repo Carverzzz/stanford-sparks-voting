@@ -33,6 +33,7 @@ export interface Round {
   correct_option_index: number; // The index of the lie
   status: RoundStatus;
   created_at: string;
+  voting_ends_at?: string | null; // 倒计时结束时间
   updated_at?: string;
   votes: { [key: number]: number }; // Aggregated votes for chart
 }

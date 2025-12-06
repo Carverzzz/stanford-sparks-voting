@@ -12,7 +12,7 @@ interface LiveChartProps {
 
 export const LiveChart: React.FC<LiveChartProps> = ({ data, totalVotes, activeParticipants = 0, highlightIndex, showAnswer }) => {
   return (
-    <div className="w-full h-64 md:h-80 mt-6">
+    <div className="w-full h-56 md:h-64 mt-4 relative">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
           <XAxis type="number" hide domain={[0, 'dataMax + 2']} />
@@ -35,24 +35,18 @@ export const LiveChart: React.FC<LiveChartProps> = ({ data, totalVotes, activePa
                 return null;
             }}
           />
-          <Bar dataKey="votes" radius={[0, 4, 4, 0]} barSize={60}>
+          <Bar dataKey="votes" radius={[0, 4, 4, 0]} barSize={44}>
             {data.map((entry, index) => {
               // Color logic
-              let fill = '#e5e7eb'; // Default gray (WAITING/VOTING)
-              
+              let fill = '#e5e7eb'; // default gray during voting
+
               if (showAnswer) {
-                if (index === highlightIndex) {
-                    fill = '#10b981'; // Green for Truth (Wait, game is find the Lie? If so, Green for correct selection)
-                } else {
-                    fill = '#ef4444'; // Red for wrong
-                }
+                // Reveal: highlight the lie (correct_option_index) in Stanford red
+                fill = index === highlightIndex ? '#b91c1c' : '#d1d5db';
               } else {
-                 // During voting, show gradient based on intensity relative to max
-                 const maxVotes = Math.max(...data.map(d => d.votes)) || 1;
-                 const intensity = entry.votes / maxVotes;
-                 // Interpolate Stanford Red
-                 // Simple approach: Opacity
-                 fill = `rgba(140, 21, 21, ${0.3 + (intensity * 0.7)})`;
+                const maxVotes = Math.max(...data.map(d => d.votes)) || 1;
+                const intensity = entry.votes / maxVotes;
+                fill = `rgba(140, 21, 21, ${0.28 + (intensity * 0.55)})`;
               }
 
               return (
@@ -71,8 +65,11 @@ export const LiveChart: React.FC<LiveChartProps> = ({ data, totalVotes, activePa
       <div className="absolute inset-0 pointer-events-none flex flex-col justify-between py-2 pl-4 pr-12">
          {data.map((d, i) => (
              <div key={i} className="flex-1 flex items-center justify-between">
-                 <span className="bg-white/80 px-2 py-1 rounded text-sm font-semibold truncate max-w-[70%] shadow-sm backdrop-blur-sm">
+                 <span className="bg-white/85 px-2 py-1 rounded text-sm font-semibold truncate max-w-[68%] shadow-sm backdrop-blur-sm flex items-center gap-2">
                     {d.name}
+                    {showAnswer && highlightIndex === i && (
+                      <span className="text-2xs font-bold uppercase text-white bg-red-600 px-2 py-0.5 rounded-full">Lie</span>
+                    )}
                  </span>
                  <div className="text-right">
                     <span className="font-bold text-stanford block">

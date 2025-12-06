@@ -8,6 +8,8 @@ export const ParticipantView: React.FC = () => {
   const [round, setRound] = useState<Round | null>(null);
   const [hasVoted, setHasVoted] = useState(false);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
+  const [countdownSeconds, setCountdownSeconds] = useState<number | null>(null);
+  const [isExpired, setIsExpired] = useState(false);
   
   // Generate unique session ID for this user (persist in localStorage)
   const [userSessionId] = useState(() => {
@@ -94,8 +96,25 @@ export const ParticipantView: React.FC = () => {
     };
   }, [userSessionId]);
 
+  // 倒计时显示 & 到期后本地禁用投票
+  useEffect(() => {
+    if (round?.status === RoundStatus.VOTING && round.voting_ends_at) {
+      const updateRemaining = () => {
+        const secs = Math.max(0, Math.floor((new Date(round.voting_ends_at!).getTime() - Date.now()) / 1000));
+        setCountdownSeconds(secs);
+        setIsExpired(secs <= 0);
+      };
+      updateRemaining();
+      const interval = setInterval(updateRemaining, 1000);
+      return () => clearInterval(interval);
+    } else {
+      setCountdownSeconds(null);
+      setIsExpired(false);
+    }
+  }, [round?.id, round?.status, round?.voting_ends_at]);
+
   const handleVote = async (index: number) => {
-    if (hasVoted || !round || round.status !== RoundStatus.VOTING) return;
+    if (hasVoted || !round || round.status !== RoundStatus.VOTING || isExpired) return;
     
     // Immediate visual feedback
     setSelectedOption(index);
@@ -153,7 +172,7 @@ export const ParticipantView: React.FC = () => {
     );
   }
 
-  const isLocked = round.status === RoundStatus.LOCKED || round.status === RoundStatus.REVEALED;
+  const isLocked = round.status === RoundStatus.LOCKED || round.status === RoundStatus.REVEALED || isExpired;
   const isRevealed = round.status === RoundStatus.REVEALED;
 
   return (
@@ -174,7 +193,7 @@ export const ParticipantView: React.FC = () => {
                     className="inline-flex items-center px-4 py-1 rounded-full text-sm font-bold bg-red-100 text-red-700 shadow-sm"
                  >
                      <span className="w-2 h-2 bg-red-600 rounded-full mr-2 animate-pulse"></span>
-                     VOTING OPEN
+                     {isExpired ? 'TIME UP' : 'VOTING OPEN'}
                  </motion.span>
              )}
              {isLocked && !isRevealed && (
@@ -183,6 +202,13 @@ export const ParticipantView: React.FC = () => {
                  </span>
              )}
         </div>
+
+        {/* Countdown */}
+        {round.status === RoundStatus.VOTING && countdownSeconds !== null && (
+          <div className="text-center text-lg font-mono font-bold text-stanford mb-4">
+            剩余时间：{Math.floor(countdownSeconds / 60)}:{String(countdownSeconds % 60).padStart(2, '0')}
+          </div>
+        )}
 
         {/* Options */}
         <div className="space-y-4 flex-1">

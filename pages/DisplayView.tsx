@@ -10,6 +10,7 @@ export const DisplayView: React.FC = () => {
   const [currentRound, setCurrentRound] = useState<Round | null>(null);
   const [votes, setVotes] = useState<{ [key: number]: number }>({ 0: 0, 1: 0, 2: 0 });
   const [activeParticipants, setActiveParticipants] = useState(0); // 活跃参与人数
+  const [countdownSeconds, setCountdownSeconds] = useState<number | null>(null);
 
   // Get current hostname for QR code
   const [joinUrl, setJoinUrl] = useState('');
@@ -141,6 +142,21 @@ export const DisplayView: React.FC = () => {
     };
   }, [currentRound?.id]);
 
+  // 初始化倒计时（仅在 VOTING 时）
+  useEffect(() => {
+    if (currentRound?.status === RoundStatus.VOTING && currentRound.voting_ends_at) {
+      const tick = () => {
+        const secs = Math.max(0, Math.floor((new Date(currentRound.voting_ends_at!).getTime() - Date.now()) / 1000));
+        setCountdownSeconds(secs);
+      };
+      tick();
+      const interval = setInterval(tick, 1000);
+      return () => clearInterval(interval);
+    } else {
+      setCountdownSeconds(null);
+    }
+  }, [currentRound?.id, currentRound?.status, currentRound?.voting_ends_at]);
+
   const totalVotes = (Object.values(votes) as number[]).reduce((a, b) => a + b, 0);
   const chartData = currentRound ? currentRound.options.map((opt, i) => ({
     name: opt,
@@ -172,80 +188,84 @@ export const DisplayView: React.FC = () => {
       );
   }
 
+  const lieText = currentRound.options[currentRound.correct_option_index];
+  const showAnswer = currentRound.status === RoundStatus.REVEALED;
+
   // ACTIVE ROUND STATE
   return (
-    <div className="min-h-screen bg-ui-50 p-8 flex flex-col">
+    <div className="min-h-screen bg-ui-50 p-4 md:p-6 flex flex-col">
         {/* Header */}
-        <header className="flex justify-between items-end border-b-2 border-ui-200 pb-6">
-            <div>
-                <h2 className="text-2xl font-bold text-stanford uppercase tracking-widest mb-2">Two Truths & One Lie</h2>
-                <h1 className="text-7xl font-extrabold text-ui-900 tracking-tight leading-none">{currentRound.participant_name}</h1>
+        <header className="flex justify-between items-start border-b border-ui-200 pb-4 gap-4">
+            <div className="space-y-1">
+                <h2 className="text-lg font-bold text-stanford uppercase tracking-wider">Two Truths & One Lie</h2>
+                <h1 className="text-3xl md:text-4xl font-extrabold text-ui-900 tracking-tight leading-tight">{currentRound.participant_name}</h1>
             </div>
-            <div className="text-right space-y-3">
-                <div className="bg-white px-6 py-3 rounded-xl border border-ui-200 shadow-sm">
-                    <div className="text-sm font-bold text-ui-400 uppercase tracking-wider">Total Votes</div>
-                    <div className="text-4xl font-mono font-bold text-ui-900">{totalVotes}</div>
+            <div className="flex gap-3">
+                <div className="bg-white px-4 py-2 rounded-xl border border-ui-200 shadow-sm text-center min-w-[110px]">
+                    <div className="text-2xs font-bold text-ui-400 uppercase tracking-wider">Total Votes</div>
+                    <div className="text-3xl font-mono font-bold text-ui-900">{totalVotes}</div>
                 </div>
-                <div className="bg-stanford/10 px-6 py-3 rounded-xl border border-stanford/20 shadow-sm">
-                    <div className="text-sm font-bold text-stanford uppercase tracking-wider">Active Participants</div>
-                    <div className="text-3xl font-mono font-bold text-stanford">{activeParticipants}</div>
+                <div className="bg-stanford/10 px-4 py-2 rounded-xl border border-stanford/20 shadow-sm text-center min-w-[110px]">
+                    <div className="text-2xs font-bold text-stanford uppercase tracking-wider">Active</div>
+                    <div className="text-2xl font-mono font-bold text-stanford">{activeParticipants}</div>
                 </div>
             </div>
         </header>
 
         {/* Main Content */}
-        <div className="flex-1 flex flex-col justify-center mt-8 gap-8">
+        <div className="flex-1 flex flex-col mt-6 gap-4">
             
-            {/* Status / Countdown */}
-            <div className="flex justify-center h-24">
+            {/* Status / Countdown / Reveal */}
+            <div className="flex flex-col items-center gap-2 min-h-[60px]">
                 <AnimatePresence mode="wait">
-                    {currentRound.status === RoundStatus.VOTING ? (
+                    {currentRound.status === RoundStatus.VOTING && countdownSeconds !== null ? (
                         <motion.div 
                             key="countdown"
-                            initial={{ scale: 0.8, opacity: 0 }}
+                            initial={{ scale: 0.9, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
-                            exit={{ scale: 0.8, opacity: 0 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            className="bg-white px-4 py-2 rounded-full border border-ui-200 shadow-sm text-sm font-mono font-bold text-stanford"
                         >
-                            <Countdown seconds={60} isActive={true} onComplete={() => {}} />
+                            倒计时：{Math.floor(countdownSeconds / 60)}:{String(countdownSeconds % 60).padStart(2, '0')}
                         </motion.div>
-                    ) : currentRound.status === RoundStatus.REVEALED ? (
+                    ) : showAnswer ? (
                          <motion.div 
                             key="revealed"
-                            initial={{ y: 20, opacity: 0 }}
+                            initial={{ y: 10, opacity: 0 }}
                             animate={{ y: 0, opacity: 1 }}
-                            className="bg-stanford text-white px-8 py-2 rounded-full text-3xl font-bold shadow-lg flex items-center gap-3"
+                            className="bg-stanford text-white px-5 py-2 rounded-full text-base md:text-lg font-bold shadow-lg flex items-center gap-2"
                         >
-                            <Trophy size={32} /> THE LIE IS REVEALED
+                            <Trophy size={20} /> THE LIE: {lieText}
                         </motion.div>
                     ) : currentRound.status === RoundStatus.LOCKED ? (
                         <motion.div 
                             key="locked"
-                            className="bg-ui-800 text-white px-8 py-2 rounded-full text-2xl font-bold"
+                            className="bg-ui-800 text-white px-5 py-2 rounded-full text-sm md:text-base font-bold"
                         >
                             VOTING CLOSED
                         </motion.div>
                     ) : (
-                        <div className="text-ui-400 text-2xl font-medium">Waiting for host...</div>
+                        <div className="text-ui-400 text-sm md:text-base font-medium">Waiting for host...</div>
                     )}
                 </AnimatePresence>
             </div>
 
             {/* Chart */}
-            <div className="flex-1 min-h-[400px] bg-white rounded-3xl shadow-sm border border-ui-200 p-8 relative overflow-hidden">
+            <div className="flex-1 min-h-[320px] bg-white rounded-2xl shadow-lg border border-ui-100 p-4 md:p-6 relative overflow-hidden">
                 <LiveChart 
                     data={chartData} 
                     totalVotes={totalVotes}
                     activeParticipants={activeParticipants}
-                    showAnswer={currentRound.status === RoundStatus.REVEALED}
+                    showAnswer={showAnswer}
                     highlightIndex={currentRound.correct_option_index}
                 />
                 
                 {/* Vote Progress Indicator */}
                 {activeParticipants > 0 && (
-                    <div className="absolute top-4 right-4 bg-ui-900/80 text-white px-4 py-2 rounded-lg text-sm font-bold">
+                    <div className="absolute top-3 right-3 bg-ui-900/80 text-white px-3 py-2 rounded-lg text-xs font-bold">
                         {totalVotes} / {activeParticipants} 已投票
                         {activeParticipants > 0 && (
-                            <div className="text-xs font-normal mt-1 opacity-75">
+                            <div className="text-2xs font-normal mt-1 opacity-75">
                                 {Math.round((totalVotes / activeParticipants) * 100)}% 完成率
                             </div>
                         )}
@@ -254,7 +274,7 @@ export const DisplayView: React.FC = () => {
             </div>
 
             {/* Instructions Footer */}
-            <div className="text-center text-ui-400 text-lg font-medium">
+            <div className="text-center text-ui-400 text-sm md:text-base font-medium">
                 Identify the statement that is a <span className="text-stanford font-bold">LIE</span>.
             </div>
         </div>

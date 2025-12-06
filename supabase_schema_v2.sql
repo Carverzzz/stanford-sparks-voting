@@ -21,6 +21,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'rounds' AND column_name = 'session_id') THEN
     ALTER TABLE rounds ADD COLUMN session_id UUID REFERENCES sessions(id) ON DELETE CASCADE;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'rounds' AND column_name = 'voting_ends_at') THEN
+    ALTER TABLE rounds ADD COLUMN voting_ends_at TIMESTAMPTZ;
+  END IF;
 END $$;
 
 -- Index for sessions

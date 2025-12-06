@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS rounds (
   options TEXT[] NOT NULL, -- Array of 3 statements
   correct_option_index INTEGER NOT NULL CHECK (correct_option_index >= 0 AND correct_option_index <= 2),
   status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'VOTING', 'LOCKED', 'REVEALED', 'COMPLETED')),
+  voting_ends_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

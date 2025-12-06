@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { parseExcel } from '../utils/excelParser';
 import { parseCSVFile } from '../utils/csvParser';
@@ -19,6 +19,10 @@ export const HostDashboard: React.FC = () => {
   const [currentSession, setCurrentSession] = useState<Session | null>(null); // 当前活动
   const [sheetUrl, setSheetUrl] = useState(DEFAULT_SHEET_URL); // Google Sheets URL
   const [isSyncing, setIsSyncing] = useState(false); // 是否正在同步
+  const [timerMinutes, setTimerMinutes] = useState(2);
+  const [timerSeconds, setTimerSeconds] = useState(0);
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
+  const lockingRef = useRef(false);
 
   // Function to fetch vote counts from database
   const fetchVoteCounts = async (roundId: string) => {
@@ -355,7 +359,7 @@ export const HostDashboard: React.FC = () => {
           }));
           setParticipants(formatted);
         } else {
-          setParticipants(data);
+        setParticipants(data);
         }
         
         toast.success(`成功导入并同步 ${data.length} 位参与者到 Supabase！`);
@@ -371,6 +375,34 @@ export const HostDashboard: React.FC = () => {
 
   const createRound = async (p: Omit<Participant, 'id'>) => {
     setIsLoading(true);
+    try {
+      // 确保存在 session（活动）
+      let sessionId = currentSession?.id;
+      if (!sessionId) {
+        const { data: activeSession } = await supabase
+          .from('sessions')
+          .select('*')
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        if (activeSession) {
+          sessionId = activeSession.id;
+          setCurrentSession(activeSession);
+        } else {
+          const { data: newSession, error: sessionErr } = await supabase
+            .from('sessions')
+            .insert({ name: `Session ${new Date().toLocaleString()}` })
+            .select()
+            .single();
+          if (sessionErr || !newSession) {
+            throw new Error('无法创建活动，请先开始新活动');
+          }
+          sessionId = newSession.id;
+          setCurrentSession(newSession);
+        }
+      }
+
     // Shuffle options logic
     const optionsRaw = [p.statement_1, p.statement_2, p.statement_3];
     const originalLieIndex = p.lie_index;
@@ -390,14 +422,16 @@ export const HostDashboard: React.FC = () => {
       votes: { 0: 0, 1: 0, 2: 0 }
     };
 
-    // Save to Supabase
-    await supabase.from('rounds').insert([{ 
+      // Save to Supabase，附带 session_id
+      const { error: insertError } = await supabase.from('rounds').insert([{ 
         id: newRound.id,
         participant_name: newRound.participant_name,
         options: newRound.options,
         correct_option_index: newRound.correct_option_index,
-        status: RoundStatus.PENDING
+          status: RoundStatus.PENDING,
+          session_id: sessionId
     }]);
+      if (insertError) throw insertError;
 
     setCurrentRound(newRound);
     setVoteCounts({ 0: 0, 1: 0, 2: 0 });
@@ -409,8 +443,72 @@ export const HostDashboard: React.FC = () => {
       payload: newRound
     });
 
+      toast.success("Round sent to screen! Participants can now vote.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '创建轮次失败';
+      toast.error(msg);
+      console.error(err);
+    } finally {
     setIsLoading(false);
-    toast.success("Round sent to screen! Participants can now vote.");
+    }
+  };
+
+  // 倒计时与超时自动锁票
+  useEffect(() => {
+    if (!currentRound || !currentRound.voting_ends_at || currentRound.status !== RoundStatus.VOTING) {
+      setRemainingSeconds(null);
+      return;
+    }
+
+    const updateRemaining = () => {
+      const diffMs = new Date(currentRound.voting_ends_at!).getTime() - Date.now();
+      const secs = Math.max(0, Math.floor(diffMs / 1000));
+      setRemainingSeconds(secs);
+      if (secs <= 0 && !lockingRef.current) {
+        lockingRef.current = true;
+        updateStatus(RoundStatus.LOCKED).finally(() => {
+          lockingRef.current = false;
+        });
+      }
+    };
+
+    updateRemaining();
+    const interval = setInterval(updateRemaining, 1000);
+    return () => clearInterval(interval);
+  }, [currentRound?.id, currentRound?.status, currentRound?.voting_ends_at]);
+
+  const startTimer = async () => {
+    if (!currentRound || currentRound.status !== RoundStatus.PENDING) return;
+    const durationMs = Math.max(5 * 1000, (timerMinutes * 60 + timerSeconds) * 1000);
+    const endsAt = new Date(Date.now() + durationMs).toISOString();
+
+    const { error } = await supabase
+      .from('rounds')
+      .update({ status: RoundStatus.VOTING, voting_ends_at: endsAt })
+      .eq('id', currentRound.id);
+
+    if (error) {
+      toast.error('Failed to start timer');
+      console.error(error);
+      return;
+    }
+
+    const updatedRound: Round = {
+      ...currentRound,
+      status: RoundStatus.VOTING,
+      voting_ends_at: endsAt,
+    };
+
+    setCurrentRound(updatedRound);
+
+    // Broadcast Round Start with timer
+    await supabase.channel(CHANNELS.GAME).send({
+      type: 'broadcast',
+      event: EVENTS.ROUND_UPDATE,
+      payload: updatedRound
+    });
+
+    toast.success('Voting started with timer!');
   };
 
   const updateStatus = async (status: RoundStatus) => {
@@ -449,11 +547,11 @@ export const HostDashboard: React.FC = () => {
       setCurrentRound(updated);
       
       // Broadcast to all clients
-      await supabase.channel(CHANNELS.GAME).send({
-        type: 'broadcast',
-        event: EVENTS.ROUND_UPDATE,
-        payload: updated
-      });
+    await supabase.channel(CHANNELS.GAME).send({
+      type: 'broadcast',
+      event: EVENTS.ROUND_UPDATE,
+      payload: updated
+    });
       
       toast.success(`Round status updated to ${status}`);
     }
@@ -465,11 +563,11 @@ export const HostDashboard: React.FC = () => {
     <div className="min-h-screen bg-ui-100 p-6 font-sans">
       <header className="flex flex-col gap-4 mb-8 bg-white p-4 rounded-xl shadow-sm border border-ui-200">
           <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-2xl font-bold text-ui-900">Host Control Center</h1>
-              <p className="text-ui-500 text-sm">Manage the flow of the event</p>
-            </div>
-            <div className="flex gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-ui-900">Host Control Center</h1>
+            <p className="text-ui-500 text-sm">Manage the flow of the event</p>
+          </div>
+          <div className="flex gap-3">
                <Button
                   onClick={startNewSession}
                   disabled={isLoading}
@@ -485,12 +583,12 @@ export const HostDashboard: React.FC = () => {
                >
                   <Cloud size={16} className="mr-2" /> {isSyncing ? '同步中...' : '同步 Google Sheets'}
                </Button>
-               <label className="cursor-pointer">
+             <label className="cursor-pointer">
                   <input type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFileUpload} />
-                  <div className="bg-ui-900 text-white hover:bg-black px-4 py-2 rounded-lg flex items-center gap-2 font-medium shadow-sm transition text-sm">
+                <div className="bg-ui-900 text-white hover:bg-black px-4 py-2 rounded-lg flex items-center gap-2 font-medium shadow-sm transition text-sm">
                       <Upload size={16} /> Import Excel/CSV
-                  </div>
-               </label>
+                </div>
+             </label>
             </div>
           </div>
           
@@ -529,13 +627,13 @@ export const HostDashboard: React.FC = () => {
                                          ? 'border-stanford bg-red-50 shadow-md' 
                                          : 'border-ui-100 hover:border-stanford hover:bg-red-50'
                                      }`}
-                                     onClick={() => createRound(p)}>
+                                 onClick={() => createRound(p)}>
                                     <div className="flex-1">
                                         <div className={`font-semibold ${isActive ? 'text-stanford' : 'text-ui-800 group-hover:text-stanford'}`}>
                                             {p.name}
                                             {isActive && <span className="ml-2 text-xs bg-stanford text-white px-2 py-0.5 rounded">LIVE</span>}
                                         </div>
-                                        <div className="text-xs text-ui-400">3 Statements</div>
+                                    <div className="text-xs text-ui-400">3 Statements</div>
                                     </div>
                                     {isActive ? (
                                         <div className="w-2 h-2 bg-red-600 rounded-full animate-pulse"></div>
@@ -562,8 +660,8 @@ export const HostDashboard: React.FC = () => {
                                 </div>
                                 <div className="text-right space-y-2">
                                     <div>
-                                        <div className="text-sm font-medium text-ui-500 mb-1">Total Votes</div>
-                                        <div className="text-2xl font-mono font-bold text-ui-900">{totalVotes}</div>
+                                    <div className="text-sm font-medium text-ui-500 mb-1">Total Votes</div>
+                                    <div className="text-2xl font-mono font-bold text-ui-900">{totalVotes}</div>
                                     </div>
                                     <div>
                                         <div className="text-sm font-medium text-ui-500 mb-1">Active Participants</div>
@@ -572,10 +670,41 @@ export const HostDashboard: React.FC = () => {
                                 </div>
                             </div>
 
+                            {/* Timer Settings */}
+                            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+                                <div className="flex items-center gap-3">
+                                    <span className="text-sm font-semibold text-ui-700">Timer</span>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="number"
+                                            min={0}
+                                            value={timerMinutes}
+                                            onChange={(e) => setTimerMinutes(Math.max(0, parseInt(e.target.value || '0')))}
+                                            className="w-16 px-2 py-1 border rounded-lg text-sm"
+                                        />
+                                        <span className="text-sm text-ui-500">分</span>
+                                        <input
+                                            type="number"
+                                            min={0}
+                                            max={59}
+                                            value={timerSeconds}
+                                            onChange={(e) => setTimerSeconds(Math.min(59, Math.max(0, parseInt(e.target.value || '0'))))}
+                                            className="w-16 px-2 py-1 border rounded-lg text-sm"
+                                        />
+                                        <span className="text-sm text-ui-500">秒</span>
+                                    </div>
+                                </div>
+                                {currentRound.status === RoundStatus.VOTING && remainingSeconds !== null && (
+                                  <div className="text-sm font-semibold text-stanford">
+                                    倒计时：{Math.floor(remainingSeconds / 60)}:{String(remainingSeconds % 60).padStart(2, '0')}
+                                  </div>
+                                )}
+                            </div>
+
                             {/* Control Grid */}
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                                 <Button 
-                                    onClick={() => updateStatus(RoundStatus.VOTING)}
+                                    onClick={startTimer}
                                     disabled={currentRound.status !== RoundStatus.PENDING}
                                     className={`w-full h-16 text-lg ${currentRound.status === RoundStatus.VOTING ? 'ring-2 ring-offset-2 ring-stanford' : ''}`}
                                 >
